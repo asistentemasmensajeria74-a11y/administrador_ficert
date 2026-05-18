@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel Administrador - Sistema de Reparto</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* --- ESTILOS BASE --- */
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Arial, sans-serif; }
+        body { height: 100vh; overflow: hidden; background: #f5f5f5; }
+
+        /* --- HEADER --- */
+        .header-admin {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; padding: 12px 20px;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: relative; z-index: 10;
+        }
+
+        .stats-container { display: flex; gap: 15px; }
+        .stat-btn {
+            background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3);
+            padding: 8px 15px; border-radius: 20px; cursor: pointer; transition: 0.3s;
+            display: flex; align-items: center; gap: 8px; font-size: 14px;
+        }
+        .stat-btn:hover { background: rgba(255,255,255,0.3); transform: translateY(-2px); }
+
+        /* --- MAPA --- */
+        #mapa { height: calc(100vh - 65px); width: 100%; }
+
+        /* --- MODAL CENTRAL --- */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); z-index: 2000;
+            justify-content: center; align-items: center;
+        }
+        .modal-overlay.active { display: flex; }
+
+        .main-modal {
+            background: white; width: 95%; max-width: 1000px; height: 85vh;
+            border-radius: 16px; display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .modal-nav {
+            display: flex; background: #f8f9fa; border-bottom: 2px solid #e9ecef;
+        }
+        .nav-tab {
+            flex: 1; padding: 15px; border: none; background: transparent;
+            cursor: pointer; font-weight: 500; color: #666; transition: 0.3s;
+            border-bottom: 3px solid transparent;
+        }
+        .nav-tab.active {
+            color: #667eea; border-bottom: 3px solid #667eea; background: white;
+        }
+
+        .modal-body { flex: 1; overflow-y: auto; padding: 20px; background: #fcfcfc; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* --- CARDS DE ENVÍOS (DISEÑO ORIGINAL REFUERZADO) --- */
+        .envio-item {
+            background: white; border: 1px solid #e9ecef; border-radius: 10px;
+            padding: 15px; margin-bottom: 12px; transition: 0.3s;
+            display: grid; grid-template-columns: 40px 1fr auto; gap: 15px; align-items: start;
+        }
+        .envio-item:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+        .badge-tipo {
+            width: 35px; height: 35px; border-radius: 50%; display: flex;
+            align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 11px;
+        }
+
+        .info-grid { display: grid; gap: 8px; }
+        .info-row { display: flex; gap: 15px; flex-wrap: wrap; font-size: 13px; }
+        .text-bold { font-weight: bold; color: #333; }
+        .text-muted { color: #666; }
+
+        /* --- SPINNER Y MENSAJES --- */
+        .loading-state { text-align: center; padding: 50px; color: #666; }
+        .empty-state { text-align: center; padding: 50px; color: #999; }
+        .spinner { font-size: 30px; color: #667eea; margin-bottom: 15px; animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        /* --- BOTONES FLOTANTES --- */
+        .fab-container { position: fixed; bottom: 25px; right: 25px; display: flex; flex-direction: column; gap: 12px; }
+        .fab {
+            width: 55px; height: 55px; border-radius: 50%; border: none;
+            color: white; font-size: 20px; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            transition: 0.3s; display: flex; align-items: center; justify-content: center;
+        }
+        .fab-refresh { background: #17a2b8; }
+        .fab-menu { background: #667eea; }
+        .fab:hover { transform: scale(1.1); }
+    </style>
+</head>
+<body>
+
+    <header class="header-admin">
+        <h2 onclick="location.reload()" style="cursor:pointer"><i class="fas fa-shipping-fast"></i> Sistema Reparto</h2>
+        <div class="stats-container">
+<button class="stat-btn" id="btn-mapear-captura" onclick="mapearEnviosCaptura()">
+    <i class="fas fa-map-marked-alt"></i> <span id="count-programados">0</span> Ver en Mapa
+</button>
+            <button class="stat-btn" onclick="abrirModalAdmin('enproceso')">
+                <i class="fas fa-truck"></i> <span id="count-ruta">0</span> Ruta
+            </button>
+        </div>
+    </header>
+
+    <div id="mapa"></div>
+
+    <!-- MODAL ÚNICO -->
+    <div class="modal-overlay" id="mainModal">
+        <div class="main-modal">
+            <div class="modal-nav">
+                <button class="nav-tab" id="btn-tab-repartidores" onclick="cambiarTab('repartidores')">Repartidores</button>
+                <button class="nav-tab" id="btn-tab-programados" onclick="cambiarTab('programados')">Programados</button>
+                <button class="nav-tab" id="btn-tab-enproceso" onclick="cambiarTab('enproceso')">En Proceso</button>
+                <button class="nav-tab" id="btn-tab-basedatos" onclick="cambiarTab('basedatos')">Base Datos</button>
+                <button onclick="cerrarModal()" style="background:none; border:none; padding:0 20px; cursor:pointer; color:#999">
+                    <i class="fas fa-times fa-lg"></i>
+                </button>
+            </div>
+
+            <div class="modal-body">
+                <!-- Tab Repartidores -->
+                <div id="tab-repartidores" class="tab-content">
+                    <div id="lista-repartidores"></div>
+                </div>
+
+                <!-- Tab Programados (CAPTURA) -->
+                <div id="tab-programados" class="tab-content">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3>Envíos Programados</h3>
+                        <button class="stat-btn" style="background:#28a745" onclick="procesarEnvios()">
+                            <i class="fas fa-cogs"></i> Procesar a Ruta
+                        </button>
+                    </div>
+                    <div id="contenedor-captura"></div>
+                </div>
+
+                <!-- Tab En Proceso -->
+                <div id="tab-enproceso" class="tab-content">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3>Envíos en Ruta (Hoy)</h3>
+                        <button class="stat-btn" style="background:#17a2b8" onclick="imprimirEtiquetas()">
+                            <i class="fas fa-print"></i> Imprimir Etiquetas
+                        </button>
+                    </div>
+                    <div id="contenedor-ruta"></div>
+                </div>
+
+                <!-- Tab Base Datos (COPIA RUTA filtrada) -->
+                <div id="tab-basedatos" class="tab-content">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h3>Base de Datos</h3>
+                        <div class="stats-container">
+                            <input type="text" id="busqueda-db" placeholder="Buscar por nombre, dirección o guía..." 
+                                   style="padding: 8px; border: 1px solid #ddd; border-radius: 5px; width: 250px;"
+                                   onkeyup="filtrarContenedor('contenedor-basedatos', this.value)">
+                            <button class="stat-btn" style="background:#17a2b8" onclick="exportarBaseDatosCSV()">
+                                <i class="fas fa-file-export"></i> Exportar
+                            </button>
+                        </div>
+                    </div>
+                    <div id="contenedor-basedatos"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DE EDICIÓN -->
+    <div class="modal-overlay" id="editModal">
+        <div class="main-modal" style="height: 90vh; max-width: 800px;">
+            <div class="header-admin" style="background: #4a5568;">
+                <h3><i class="fas fa-edit"></i> Editar Envío</h3>
+                <button onclick="cerrarEditModal()" style="background:none; border:none; color:white; cursor:pointer;">
+                    <i class="fas fa-times fa-lg"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="form-editar-envio">
+                    <div id="campos-edicion" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <!-- Se generará dinámicamente -->
+                    </div>
+                    <div style="margin-top: 25px; display: flex; justify-content: flex-end; gap: 10px;">
+                        <button type="button" class="stat-btn" style="background:#6c757d" onclick="cerrarEditModal()">Cancelar</button>
+                        <button type="submit" class="stat-btn" style="background:#28a745">Guardar Cambios</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="fab-container">
+        <button class="fab fab-refresh" onclick="actualizarTodo()"><i class="fas fa-sync-alt"></i></button>
+        <button class="fab fab-menu" onclick="abrirModalAdmin('basedatos')"><i class="fas fa-th-large"></i></button>
+    </div>
+
+    <script>
+	let marcadoresCaptura = [];
+        let marcadorDetalle = null; // Marcador individual usado por verEnMapa
+        const URL_APPS_SCRIPT = "/api/fetch-data";
+        let mapa;
+
+        // Inicialización
+        window.onload = () => {
+            actualizarTodo();
+        };
+
+        function initMap() {
+            if (typeof google === 'undefined') {
+                console.error("Google Maps API not loaded");
+                return;
+            }
+            mapa = new google.maps.Map(document.getElementById("mapa"), {
+                zoom: 12,
+                center: { lat: 25.4383, lng: -100.9764 },
+                styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+            });
+        }
+
+        // --- NAVEGACIÓN ---
+        function abrirModalAdmin(tabNombre) {
+            limpiarMarcadorDetalle(); // Al abrir el panel se borra el punto individual
+            document.getElementById('mainModal').classList.add('active');
+            cambiarTab(tabNombre);
+        }
+
+        function cerrarModal() {
+            // Se quitó limpiarMarcadorDetalle() para que el punto persista al ver en mapa
+            document.getElementById('mainModal').classList.remove('active');
+        }
+
+        function cambiarTab(tabId) {
+            limpiarMarcadorDetalle(); // Al cambiar de pestaña se borra el punto individual
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            
+            document.getElementById(`tab-${tabId}`).classList.add('active');
+            document.getElementById(`btn-tab-${tabId}`).classList.add('active');
+            
+            // Recargar datos específicos al cambiar de tab
+            if(tabId === 'programados') cargarDatosCaptura();
+            if(tabId === 'enproceso') cargarDatosRuta();
+            if(tabId === 'basedatos') cargarDatosBaseDatos();
+        }
+
+        function filtrarContenedor(id, valor) {
+            const items = document.getElementById(id).getElementsByClassName('envio-item');
+            const search = valor.toLowerCase();
+            Array.from(items).forEach(item => {
+                const text = item.innerText.toLowerCase();
+                item.style.display = text.includes(search) ? 'grid' : 'none';
+            });
+        }
+
+        // --- CONEXIÓN REAL CON GOOGLE SHEETS ---
+async function actualizarTodo() {
+    console.log("🔄 Sincronizando contadores...");
+    limpiarMarcadorDetalle();
+    
+    try {
+        const d = new Date();
+        const pad = (n) => n.toString().padStart(2, '0');
+        const hoyFormat = `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
+        const isoFormat = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+
+        const respCap = await fetch(URL_APPS_SCRIPT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'obtenerCaptura' })
+        });
+        const dataCap = await respCap.json();
+        // Filtrar vacíos antes de contar
+        const validosCap = (dataCap.datos || []).filter(e => e['RECIBE'] || e['NOMBRE DE QUIEN RECIBE'] || e['DIRECCION']);
+        document.getElementById('count-programados').textContent = validosCap.length;
+
+        const respRut = await fetch(URL_APPS_SCRIPT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'obtenerRuta' })
+        });
+        const dataRut = await respRut.json();
+        // Filtrar y contar solo los de hoy para el botón de Ruta
+        const hoyRut = (dataRut.datos || []).filter(envio => {
+            const fecha = (envio['FECHA DE ENV'] || '').toString();
+            return fecha.includes(hoyFormat) || fecha.includes(isoFormat);
+        });
+        document.getElementById('count-ruta').textContent = hoyRut.length;
+    } catch (e) {
+        console.error("Error actualizando contadores:", e);
+    }
+}
+
+        async function cargarDatosCaptura() {
+            const contenedor = document.getElementById('contenedor-captura');
+            mostrarSpinner(contenedor, "Buscando envíos en Captura...");
+
+            try {
+                const response = await fetch(URL_APPS_SCRIPT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'obtenerCaptura' })
+                });
+                const data = await response.json();
+
+                if (data.success && data.datos && data.datos.length > 0) {
+                    renderizarListaEnvios(contenedor, data.datos, 'CAP', '#6c757d');
+                    document.getElementById('count-programados').textContent = data.datos.length;
+                } else {
+                    mostrarVacio(contenedor, "No hay envíos programados en Captura.");
+                    document.getElementById('count-programados').textContent = "0";
+                }
+            } catch (e) {
+                mostrarError(contenedor, "Error al conectar con la base de datos.");
+            }
+        }
+
+        async function cargarDatosRuta() {
+            const contenedor = document.getElementById('contenedor-ruta');
+            mostrarSpinner(contenedor, "Cargando envíos de hoy...");
+
+            try {
+                const response = await fetch(URL_APPS_SCRIPT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'obtenerRuta' })
+                });
+                const data = await response.json();
+
+                if (data.success && data.datos) {
+                    const d = new Date();
+                    const pad = (n) => n.toString().padStart(2, '0');
+                    const hoyFormat = `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
+                    const isoFormat = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+
+                    // Filtrar estrictamente por fecha de hoy
+                    const datosHoy = data.datos.filter(envio => {
+                        const fechaEnv = (envio['FECHA DE ENV'] || '').toString();
+                        return fechaEnv.includes(hoyFormat) || fechaEnv.includes(isoFormat);
+                    });
+
+                    if (datosHoy.length > 0) {
+                        datosRutaUltimos = datosHoy;
+                        renderizarListaEnvios(contenedor, datosHoy, 'RUT', '#28a745');
+                        document.getElementById('count-ruta').textContent = datosHoy.length;
+                    } else {
+                        datosRutaUltimos = [];
+                        mostrarVacio(contenedor, "No hay envíos registrados para el día de hoy.");
+                        document.getElementById('count-ruta').textContent = "0";
+                    }
+                } else {
+                    mostrarVacio(contenedor, "No hay envíos activos en Ruta.");
+                    document.getElementById('count-ruta').textContent = "0";
+                }
+            } catch (e) {
+                console.error(e);
+                mostrarError(contenedor, "Error al cargar datos de ruta.");
+            }
+        }
+
+        let datosBaseDatosUltimos = [];
+        let datosRutaUltimos = [];
+
+        async function cargarDatosBaseDatos() {
+            const contenedor = document.getElementById('contenedor-basedatos');
+            mostrarSpinner(contenedor, "Cargando Base de Datos...");
+
+            try {
+                const response = await fetch(URL_APPS_SCRIPT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'obtenerRuta' })
+                });
+                const data = await response.json();
+
+                if (data.success && data.datos && data.datos.length > 0) {
+                    datosBaseDatosUltimos = data.datos;
+                    renderizarListaEnvios(contenedor, data.datos, 'DB', '#4a5568');
+                } else {
+                    mostrarVacio(contenedor, "No hay datos en la base de datos.");
+                }
+            } catch (e) {
+                console.error(e);
+                mostrarError(contenedor, "Error al cargar base de datos.");
+            }
+        }
+
+        function exportarBaseDatosCSV() {
+            if (!datosBaseDatosUltimos || datosBaseDatosUltimos.length === 0) {
+                alert("No hay datos para exportar.");
+                return;
+            }
+
+            const headers = Object.keys(datosBaseDatosUltimos[0]);
+            const rows = datosBaseDatosUltimos.map(envio => 
+                headers.map(header => {
+                    let val = envio[header] || '';
+                    // Escapar comas y comillas para CSV
+                    val = val.toString().replace(/"/g, '""');
+                    return `"${val}"`;
+                }).join(',')
+            );
+
+            const csvContent = "\uFEFF" + headers.join(',') + '\n' + rows.join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            
+            const fecha = new Date().toISOString().split('T')[0];
+            link.setAttribute("href", url);
+            link.setAttribute("download", `BaseDatos_Reparto_${fecha}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function imprimirEtiquetas() {
+            const enviosEtiquetas = datosRutaUltimos.filter(e => e['ESTADO'] === 'EN RECOLECCION');
+            if (enviosEtiquetas.length === 0) {
+                alert("No hay envíos con estado 'EN RECOLECCION' en la lista actual.");
+                return;
+            }
+
+            const formatearFecha = (val) => {
+                if (!val) return '';
+                const s = val.toString();
+                if (s.includes('-') && s.length >= 10) {
+                    const partes = s.split('T')[0].split('-');
+                    if (partes.length === 3 && partes[0].length === 4) {
+                        return `${partes[2]}/${partes[1]}/${partes[0]}`;
+                    }
+                }
+                return s;
+            };
+
+            const ventana = window.open('', '_blank');
+            ventana.document.write(`
+                <html>
+                <head>
+                    <title>Imprimir Etiquetas</title>
+                    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
+                    <style>
+                        @page { size: 3in 2in; margin: 0; }
+                        body { margin: 0; font-family: 'Arial', sans-serif; }
+                        .etiqueta {
+                            width: 3in; height: 2in;
+                            padding: 0.1in;
+                            box-sizing: border-box;
+                            display: flex; flex-direction: column;
+                            justify-content: flex-start;
+                            overflow: hidden;
+                            page-break-after: always;
+                            border-bottom: 1px dashed #eee;
+                            position: relative;
+                        }
+                        .header { font-size: 11px; display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 2px; text-transform: uppercase; align-items: center; }
+                        .envia-label { font-size: 15px; font-weight: 800; color: #000; }
+                        .destinatario { font-size: 16px; font-weight: bold; margin-top: 4px; line-height: 1.1; }
+                        .telefono { font-size: 14px; float: right; margin-left: 5px; }
+                        .direccion { font-size: 14px; margin-top: 4px; line-height: 1.1; color: #000; font-weight: 500; height: 2.2em; overflow: hidden; }
+                        .detalle { 
+                            font-size: 13px; margin-top: 5px; padding: 4px 0;
+                            border-top: 1px solid #000; border-bottom: 1px solid #000;
+                            display: flex; justify-content: space-between; font-weight: bold;
+                        }
+                        .barcode-container {
+                            margin-top: auto;
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            height: 60px;
+                        }
+                        .barcode-container svg {
+                            max-width: 100%;
+                            height: 60px;
+                        }
+                        .moneda { font-weight: bold; color: #000; }
+                    </style>
+                </head>
+                <body>
+                    ${enviosEtiquetas.map(e => `
+                        <div class="etiqueta">
+                            <div class="header">
+                                <span>${formatearFecha(e['FECHA DE ENV'])}</span>
+                                <span class="envia-label">${e['ENVIA'] || ''}</span>
+                            </div>
+                            <div class="destinatario">
+                                <span class="telefono">${e['TELEFONO'] || ''}</span>
+                                <div>${e['NOMBRE DE QUIEN RECIBE'] || e['RECIBE'] || ''}</div>
+                            </div>
+                            <div class="direccion">
+                                ${e['DIRECCION'] || ''} <br>
+                                <strong>${e['ZONA'] || ''}</strong>
+                            </div>
+                            <div class="detalle">
+                                <span>${e['CONTENIDO'] || ''}</span>
+                                <span class="moneda">$ ${e['COBRAR'] || e['ACOBRAR'] || '0'}</span>
+                            </div>
+                            <div class="barcode-container">
+                                <svg class="barcode-img" data-value="${e['NGUIA'] || '00000'}"></svg>
+                            </div>
+                        </div>
+                    `).join('')}
+                    <script>
+                        window.onload = () => { 
+                            // Generar códigos de barras
+                            document.querySelectorAll('.barcode-img').forEach(el => {
+                                JsBarcode(el, el.dataset.value, {
+                                    format: "CODE128",
+                                    width: 2,
+                                    height: 40,
+                                    displayValue: true,
+                                    fontSize: 14,
+                                    margin: 0
+                                });
+                            });
+
+                            setTimeout(() => {
+                                window.print(); 
+                                window.close(); 
+                            }, 1000);
+                        };
+                    <\/script>
+                </body>
+                </html>
+            `);
+            ventana.document.close();
+        }
+        
+        // --- RENDERIZADO DE COMPONENTES ---
+        function renderizarListaEnvios(contenedor, lista, prefijo, color) {
+            contenedor.innerHTML = '';
+            lista.forEach((envio, index) => {
+                // Saltar si no tiene datos básicos (evita mostrar filas vacías de la hoja)
+                if (!envio['RECIBE'] && !envio['NOMBRE DE QUIEN RECIBE'] && !envio['DIRECCION']) return;
+
+                const item = document.createElement('div');
+                item.className = 'envio-item';
+                
+                item.innerHTML = `
+                    <div class="badge-tipo" style="background:${color}">${prefijo}</div>
+                    <div class="info-grid">
+                        <div class="info-row">
+                            <span class="text-bold">📛 ${envio['NOMBRE DE QUIEN RECIBE'] || envio['RECIBE'] || 'S/N'} ${envio['APELLIDO DE QUIEN RECIBE'] || ''}</span>
+                            <span class="text-muted">📞 ${envio['TELEFONO'] || ''}</span>
+                            <span style="color:#667eea">🏷️ ${envio['NGUIA'] || envio['Marca temporal'] || ''}</span>
+                        </div>
+                        <div class="info-row">
+                            <span>📍 ${envio['DIRECCION'] || 'Sin dirección'}</span>
+                            <span class="text-muted">🗺️ ${envio['ZONA'] || ''}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="text-muted">📦 ${envio['CONTENIDO'] || ''}</span>
+                            <span style="color:#28a745; font-weight:bold">💰 $${envio['COBRAR'] || envio['ACOBRAR'] || '0'}</span>
+                        </div>
+                        <div class="info-row">
+                            <span style="font-size:11px; background:#eee; padding:2px 8px; border-radius:10px">${envio['ENVIA'] || 'Remitente'}</span>
+                            <span style="font-size:11px; background:#fff3cd; padding:2px 8px; border-radius:10px">${envio['ESTADO'] || 'PENDIENTE'}</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 5px;">
+                        <button class="stat-btn" style="color:#667eea; border-color:#667eea" onclick="verEnMapa(this)" 
+                                data-dir="${envio['DIRECCION'] || ''}" 
+                                data-zona="${envio['ZONA'] || ''}">
+                            <i class="fas fa-map-marker-alt"></i>
+                        </button>
+                        <button class="stat-btn" style="color:#28a745; border-color:#28a745" onclick="abrirEditModal(${JSON.stringify(envio).replace(/"/g, '&quot;')})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                    </div>
+                `;
+                contenedor.appendChild(item);
+            });
+        }
+
+        // --- UTILIDADES DE ESTADO ---
+        function mostrarSpinner(contenedor, mensaje) {
+            contenedor.innerHTML = `
+                <div class="loading-state">
+                    <div class="spinner"><i class="fas fa-sync-alt"></i></div>
+                    <p>${mensaje}</p>
+                </div>`;
+        }
+
+        function mostrarVacio(contenedor, mensaje) {
+            contenedor.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-box-open" style="font-size:40px; margin-bottom:10px"></i>
+                    <p>${mensaje}</p>
+                </div>`;
+        }
+
+        function mostrarError(contenedor, mensaje) {
+            contenedor.innerHTML = `<div class="empty-state" style="color:red"><i class="fas fa-exclamation-triangle"></i> ${mensaje}</div>`;
+        }
+
+        // --- ACCIONES ---
+	async function mapearEnviosCaptura() {
+    const btn = document.getElementById('btn-mapear-captura');
+    const originalContent = btn.innerHTML;
+    
+    // Al mapear todos, borramos el individual
+    limpiarMarcadorDetalle();
+
+    // 1. Efecto visual de carga en el botón
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mapeando...';
+
+    // 2. Limpiar marcadores anteriores si existen
+    limpiarMarcadoresCaptura();
+
+    try {
+        // 3. Obtener los datos
+        const response = await fetch(URL_APPS_SCRIPT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'obtenerCaptura' })
+        });
+        const data = await response.json();
+
+        if (data.success && data.datos && data.datos.length > 0) {
+            const geocoder = new google.maps.Geocoder();
+            const bounds = new google.maps.LatLngBounds();
+            let enviosProcesados = 0;
+
+            // 4. Iterar sobre los envíos para geocodificarlos
+            for (const envio of data.datos) {
+                const direccion = `${envio['DIRECCION']}, ${envio['ZONA']}, Saltillo, Coahuila, México`;
+                
+                // Usamos una promesa para manejar la geocodificación de forma ordenada
+                await new Promise((resolve) => {
+                    geocoder.geocode({ address: direccion }, (results, status) => {
+                        if (status === 'OK') {
+                            const position = results[0].geometry.location;
+                            
+                            const marker = new google.maps.Marker({
+                                position: position,
+                                map: mapa,
+                                title: `${envio['NOMBRE DE QUIEN RECIBE']}`,
+                                animation: google.maps.Animation.DROP,
+                                icon: {
+                                    url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+                                }
+                            });
+
+                            // Ventana de información al hacer clic en el punto
+                            const infoWindow = new google.maps.InfoWindow({
+                                content: `
+                                    <div style="color:#333; padding:5px">
+                                        <strong>${envio['NOMBRE DE QUIEN RECIBE']}</strong><br>
+                                        ${envio['DIRECCION']}<br>
+                                        <small>📦 ${envio['CONTENIDO']}</small><br>
+                                        <strong style="color:#28a745">$${envio['COBRAR']}</strong>
+                                    </div>`
+                            });
+
+                            marker.addListener('click', () => infoWindow.open(mapa, marker));
+                            
+                            marcadoresCaptura.push(marker);
+                            bounds.extend(position);
+                            enviosProcesados++;
+                        }
+                        // Pequeño delay para no saturar la cuota de Google Maps Geocoding
+                        setTimeout(resolve, 200); 
+                    });
+                });
+            }
+
+            // 5. Ajustar el mapa para que se vean todos los puntos
+            if (enviosProcesados > 0) {
+                mapa.fitBounds(bounds);
+                // Si solo hay uno, Google Maps hace demasiado zoom, lo alejamos un poco
+                if (enviosProcesados === 1) mapa.setZoom(15); 
+            }
+
+        } else {
+            alert("No hay envíos en captura para mostrar.");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Error al obtener datos para el mapa.");
+    } finally {
+        // Restaurar botón
+        btn.disabled = false;
+        btn.innerHTML = originalContent;
+    }
+}
+
+function limpiarMarcadoresCaptura() {
+    marcadoresCaptura.forEach(m => m.setMap(null));
+    marcadoresCaptura = [];
+}
+
+function limpiarMarcadorDetalle() {
+    if (marcadorDetalle) {
+        marcadorDetalle.setMap(null);
+        marcadorDetalle = null;
+    }
+}
+
+        async function procesarEnvios() {
+            if(!confirm("¿Deseas procesar todos los envíos de Captura a Ruta?")) return;
+            limpiarMarcadorDetalle();
+            const btn = event.target;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+
+            try {
+                const response = await fetch(URL_APPS_SCRIPT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'procesarEnviosDirectoARuta' })
+                });
+                const data = await response.json();
+                alert(data.message);
+                actualizarTodo();
+            } catch (e) {
+                alert("Error al procesar.");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-cogs"></i> Procesar a Ruta';
+            }
+        }
+
+        function verEnMapa(btn) {
+            const dir = btn.dataset.dir || '';
+            const zona = btn.dataset.zona || '';
+            limpiarMarcadorDetalle(); // Borramos el anterior si existe
+            const direccionCompleta = `${dir}, ${zona}, Saltillo, Coahuila, México`;
+            const geocoder = new google.maps.Geocoder();
+            geocoder.geocode({ address: direccionCompleta }, (results, status) => {
+                if (status === 'OK') {
+                    if (!mapa) {
+                        alert('El mapa no está inicializado.');
+                        return;
+                    }
+                    mapa.setCenter(results[0].geometry.location);
+                    mapa.setZoom(17);
+                    marcadorDetalle = new google.maps.Marker({
+                        position: results[0].geometry.location,
+                        map: mapa,
+                        animation: google.maps.Animation.BOUNCE,
+                        title: dir
+                    });
+                    cerrarModal();
+                } else {
+                    alert('No se pudo encontrar la ubicación: ' + status);
+                }
+            });
+        }
+
+        // --- MÓDULO DE EDICIÓN ---
+        let envioActualEnEdicion = null;
+
+        function abrirEditModal(envio) {
+            envioActualEnEdicion = envio;
+            const contenedor = document.getElementById('campos-edicion');
+            contenedor.innerHTML = '';
+
+            const camposSoloVer = ['NGUIA', 'ENVIA'];
+            const camposNO = ['ID_RUTA'];
+            
+            const camposSolicitados = [
+                'NGUIA', 'ENVIA', 'RECIBE', 'DIRECCION', 'ZONA', 'TELEFONO', 'REFERENCIA DEL DOMICILIO', 
+                'CONTENIDO', 'ACOBRAR', 'EXTRA', 'TOTAL', 'FECHA DE ENV', 'RUTA', 'ORDEN', 
+                'ESTADO', 'TIPO_PAGO', 'FECHA_ENT', 'HORA_ENT', 'LOCALIZACION_ENT', 
+                'FOTO_ENT', 'NOTA_ENT', 'FOTO_1', 'NOTA_1', 'LOCALIZACION_1', 
+                'FECHA Y HORA_1', 'FOTO_2', 'NOTA_2', 'LOCALIZACION_2', 
+                'FECHA Y HORA_2', 'RUTA1', 'REPORTE', 'DIRECCION_MAPA', 'WHATSAPP'
+            ];
+
+            camposSolicitados.forEach(campo => {
+                if (camposNO.includes(campo)) return; 
+
+                const valor = envio[campo] || '';
+                const div = document.createElement('div');
+                div.style.marginBottom = '10px';
+                
+                if (['DIRECCION', 'REFERENCIA DEL DOMICILIO', 'NOTA_ENT', 'DIRECCION_MAPA'].includes(campo)) {
+                    div.style.gridColumn = 'span 2';
+                }
+
+                const esReadOnly = camposSoloVer.includes(campo) ? 'readonly style="background:#f0f0f0; cursor:not-allowed;"' : '';
+
+                if (campo === 'ESTADO') {
+                    const estados = ['EN RUTA', 'VISITADO', 'CANCELADO', 'NO RECOLECTADO', 'ENVIO DUPLICADO', 'PENDIENTE', 'ENTREGADO', 'EN RECOLECCION'];
+                    div.innerHTML = `
+                        <label style="display:block; font-size:11px; color:#666; margin-bottom:2px; font-weight:bold;">${campo}</label>
+                        <select name="${campo}" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:5px; font-size:13px; background:white;">
+                            ${estados.map(est => `<option value="${est}" ${valor === est ? 'selected' : ''}>${est}</option>`).join('')}
+                        </select>
+                    `;
+                } else {
+                    div.innerHTML = `
+                        <label style="display:block; font-size:11px; color:#666; margin-bottom:2px; font-weight:bold;">${campo} ${camposSoloVer.includes(campo) ? '(Bloqueado)' : ''}</label>
+                        <input type="text" name="${campo}" value="${valor}" ${esReadOnly}
+                               style="width:100%; padding:6px; border:1px solid #ddd; border-radius:5px; font-size:13px;">
+                    `;
+                }
+                contenedor.appendChild(div);
+            });
+
+            document.getElementById('editModal').classList.add('active');
+        }
+
+        function cerrarEditModal() {
+            document.getElementById('editModal').classList.remove('active');
+            envioActualEnEdicion = null;
+        }
+
+        document.getElementById('form-editar-envio').onsubmit = async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const dataActualizada = Object.fromEntries(formData.entries());
+            
+            // Mantener los campos ocultos/originales
+            const fullData = { 
+                ...envioActualEnEdicion, 
+                ...dataActualizada,
+                action: 'actualizarEnvio' 
+            };
+
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
+
+            try {
+                const response = await fetch(URL_APPS_SCRIPT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(fullData)
+                });
+                const res = await response.json();
+                
+                if(res.success) {
+                    alert("¡Cambios guardados con éxito!");
+                    cerrarEditModal();
+                    // Refrescar la pestaña actual
+                    const activeTab = document.querySelector('.nav-tab.active').id.replace('btn-tab-', '');
+                    cambiarTab(activeTab);
+                } else {
+                    alert("Error al guardar: " + res.message);
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Error de conexión al guardar cambios.");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Guardar Cambios';
+            }
+        };
+    </script>
+
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=%VITE_GOOGLE_MAPS_API_KEY%&callback=initMap"></script>
+</body>
+</html>
